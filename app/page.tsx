@@ -1,113 +1,171 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState, useRef, useEffect } from 'react';
+import Head from 'next/head';
+import Track from '../components/Track';
+import WaveformVisualizer from '../components/WaveformVisualizer';
+
+const MAX_TRACKS = 4;
+
+interface TrackData {
+  id: number;
+  recording: AudioBuffer | null;
+  isRecording: boolean;
+  isPlaying: boolean;
+  volume: number;
+  source?: AudioBufferSourceNode;
+}
 
 export default function Home() {
+  const [tracks, setTracks] = useState<TrackData[]>([
+    { id: 1, recording: null, isRecording: false, isPlaying: false, volume: 1 }
+  ]);
+  const [activeTrack, setActiveTrack] = useState<number>(1);
+  const [status, setStatus] = useState<string>('Ready');
+
+  const audioContext = useRef<AudioContext | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      audioContext.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      analyser.current = audioContext.current.createAnalyser();
+      analyser.current.connect(audioContext.current.destination);
+    }
+    return () => {
+      if (audioContext.current) {
+        audioContext.current.close();
+      }
+    };
+  }, []);
+
+  const addTrack = () => {
+    if (tracks.length < MAX_TRACKS) {
+      setTracks([...tracks, { id: tracks.length + 1, recording: null, isRecording: false, isPlaying: false, volume: 1 }]);
+    }
+  };
+
+  const removeTrack = (id: number) => {
+    setTracks(tracks.filter(track => track.id !== id));
+    if (activeTrack === id) {
+      setActiveTrack(tracks[0].id);
+    }
+  };
+
+  const updateTrack = (id: number, updates: Partial<TrackData>) => {
+    setTracks(tracks.map(track => track.id === id ? { ...track, ...updates } : track));
+  };
+
+  const playAllTracks = () => {
+    if (!audioContext.current || !analyser.current) return;
+
+    tracks.forEach(track => {
+      if (track.recording) {
+        const source = audioContext.current!.createBufferSource();
+        source.buffer = track.recording;
+        const gainNode = audioContext.current!.createGain();
+        gainNode.gain.setValueAtTime(track.volume, audioContext.current!.currentTime);
+        source.connect(gainNode);
+        gainNode.connect(analyser.current!);
+        source.loop = true;
+        source.start();
+        updateTrack(track.id, { isPlaying: true, source });
+      }
+    });
+    setStatus('Playing all tracks');
+  };
+
+  const stopAllTracks = () => {
+    tracks.forEach(track => {
+      if (track.isPlaying && track.source) {
+        track.source.stop();
+        updateTrack(track.id, { isPlaying: false, source: undefined });
+      }
+    });
+    setStatus('All tracks stopped');
+  };
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
+    <div>
+      <Head>
+        <title>Next.js Multi-Track Looper</title>
+        <meta name="description" content="A multi-track audio looper built with Next.js" />
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+
+      <main className="container">
+        <h1>Next.js Multi-Track Looper</h1>
+        <div className="looper">
+          {tracks.map(track => (
+            <Track
+              key={track.id}
+              {...track}
+              isActive={activeTrack === track.id}
+              onRecord={(buffer: AudioBuffer) => updateTrack(track.id, { recording: buffer, isRecording: false })}
+              onPlay={() => updateTrack(track.id, { isPlaying: true })}
+              onStop={() => updateTrack(track.id, { isPlaying: false })}
+              onVolumeChange={(volume: number) => updateTrack(track.id, { volume })}
+              onActivate={() => setActiveTrack(track.id)}
+              onRemove={() => removeTrack(track.id)}
+              audioContext={audioContext.current}
+              analyser={analyser.current}
             />
-          </a>
+          ))}
+          {tracks.length < MAX_TRACKS && (
+            <button onClick={addTrack} className="btn btn-secondary">Add Track</button>
+          )}
+          <div className="global-controls">
+            <button onClick={playAllTracks} className="btn btn-primary">Play All</button>
+            <button onClick={stopAllTracks} className="btn btn-primary">Stop All</button>
+          </div>
+          <div className="status">{status}</div>
+          <WaveformVisualizer analyser={analyser.current} />
         </div>
-      </div>
+      </main>
 
-      <div className="relative z-[-1] flex place-items-center before:absolute before:h-[300px] before:w-full before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 sm:before:w-[480px] sm:after:w-[240px] before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-balance text-sm opacity-50">
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
+      <style jsx>{`
+        .container {
+          min-height: 100vh;
+          padding: 0 0.5rem;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          font-family: Arial, sans-serif;
+        }
+        .looper {
+          background-color: #fff;
+          padding: 20px;
+          border-radius: 10px;
+          box-shadow: 0 0 10px rgba(0,0,0,0.1);
+          text-align: center;
+          width: 80%;
+          max-width: 800px;
+        }
+        .btn {
+          margin: 5px;
+          padding: 10px 20px;
+          font-size: 16px;
+          cursor: pointer;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          transition: background-color 0.3s;
+        }
+        .btn-primary {
+          background-color: #0070f3;
+        }
+        .btn-secondary {
+          background-color: #6c757d;
+        }
+        .global-controls {
+          margin-top: 20px;
+        }
+        .status {
+          margin-top: 20px;
+          font-weight: bold;
+        }
+      `}</style>
+    </div>
   );
 }
