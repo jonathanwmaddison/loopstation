@@ -56,9 +56,14 @@ export default function Home() {
     setTracks(tracks.map(track => track.id === id ? { ...track, ...updates } : track));
   };
 
+  const [audioSources, setAudioSources] = useState<{ [key: number]: AudioBufferSourceNode }>({});
+
+  
   const playAllTracks = () => {
     if (!audioContext.current || !analyser.current) return;
-
+  
+    const newSources: { [key: number]: AudioBufferSourceNode } = {};
+  
     tracks.forEach(track => {
       if (track.recording) {
         const source = audioContext.current!.createBufferSource();
@@ -69,21 +74,26 @@ export default function Home() {
         gainNode.connect(analyser.current!);
         source.loop = true;
         source.start();
-        updateTrack(track.id, { isPlaying: true, source });
+        newSources[track.id] = source;
+        updateTrack(track.id, { isPlaying: true });
       }
     });
+  
+    setAudioSources(newSources);
     setStatus('Playing all tracks');
   };
-
+  
   const stopAllTracks = () => {
-    tracks.forEach(track => {
-      if (track.isPlaying && track.source) {
-        track.source.stop();
-        updateTrack(track.id, { isPlaying: false, source: undefined });
-      }
+    Object.values(audioSources).forEach(source => {
+      source.stop();
+      source.disconnect();
     });
+    setAudioSources({});
+    setTracks(tracks.map(track => ({ ...track, isPlaying: false })));
     setStatus('All tracks stopped');
   };
+  
+  // ... rest of the component ...
 
   return (
     <div>
